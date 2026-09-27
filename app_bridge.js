@@ -1444,6 +1444,12 @@ export async function load(wasm, options) {
                 runtime.call("swift_ffi_task_run", job);
             });
         },
+        // A timed job (Task.sleep): run it once the delay is up.
+        task_enqueue_after: (job, delayMs) => {
+            setTimeout(() => {
+                runtime.call("swift_ffi_task_run", job);
+            }, Math.max(0, delayMs));
+        },
         async_complete: (callId, blobPtr, blobLen) => {
             void callId;
             void blobPtr;

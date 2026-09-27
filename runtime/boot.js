@@ -4,10 +4,10 @@
 // the runtime. Strings and structs copy at the boundary, so there is no
 // pointer/length or staging-buffer plumbing here.
 
-import { load } from "../app_bridge.js?v=b2a4ca64";
+import { load } from "../app_bridge.js?v=cf7cafd8";
 import { createRasterHost } from "./raster.js?v=b562f9c2";
-import { createReactTreeRenderer } from "./react_renderer.js?v=0174af5f";
-import { applyPatch } from "./flat_tree.js?v=d31eaaf5";
+import { createReactTreeRenderer } from "./react_renderer.js?v=90adb77b";
+import { applyPatch } from "./flat_tree.js?v=80dc009c";
 
 // `rendererName` picks the renderer (docs/renderer_layers.md): "webGPU"
 // (default) binds the self-drawing SwiftGPURenderer; "react" binds the
@@ -466,7 +466,7 @@ export async function mountUniversalUI(container, { wasmURL, bundle, renderer = 
   container.appendChild(canvas);
 
   const result = await boot({
-    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=2969706655"),
+    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=1904066301"),
     bundle, rendererName: renderer, embedded: true, dependencies, wasi,
   });
 

@@ -53,8 +53,8 @@
   <script src="./assets/jsqr.js?v=bc40c8a1"></script>
   <script src="./assets/qr.js?v=8086a504"></script>
   <script type="module">
-    import { boot } from "./runtime/boot.js?v=7a263f49";
-    import { Dependencies } from "./app_bridge.js?v=cf7cafd8";
+    import { boot } from "./runtime/boot.js?v=89825c12";
+    import { Dependencies } from "./app_bridge.js?v=f29c52a3";
 
     // The host half of the client: WebRTC, localStorage, and the URL. It moves
     // bytes and nothing else — every frame it sends is ciphertext the wasm
@@ -503,6 +503,15 @@
         } catch (err) { done(requestID, false, ""); }
       },
       delay(requestID, ms) { setTimeout(() => done(requestID, true, ""), ms); },
+      copyText(text) {
+        if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(text).catch(() => {}); return; }
+        // Older browsers: a selected textarea and execCommand.
+        const area = document.createElement("textarea");
+        area.value = text; area.setAttribute("readonly", ""); area.style.position = "fixed"; area.style.opacity = "0";
+        document.body.appendChild(area); area.select();
+        try { document.execCommand("copy"); } catch (err) {}
+        area.remove();
+      },
       share(text) {
         if (navigator.share) { navigator.share({ text }).catch(() => {}); return; }
         navigator.clipboard?.writeText(text).catch(() => {});
@@ -585,7 +594,7 @@
       // Local development serves without cache headers, and a stale cached
       // module quietly runs old client logic against new HTML. Bust it there;
       // the published site relies on normal HTTP caching.
-      wasmURL: "./app.wasm?v=1904066301" + (location.hostname === "localhost" ? "?t=" + Date.now() : ""),
+      wasmURL: "./app.wasm?v=2623850542" + (location.hostname === "localhost" ? "?t=" + Date.now() : ""),
       rendererName: new URLSearchParams(location.search).get("renderer") || "react",
       dependencies: { host: Dependencies.convoHost(() => host) },
     }).then((result) => {

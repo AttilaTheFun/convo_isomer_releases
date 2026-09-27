@@ -306,12 +306,24 @@ export class SwiftConvoHost {
         if (failure !== null)
             throw new SwiftError(failure);
     }
+    copyText(text) {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        Types.string.encode(w, text);
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 15, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+    }
     saveQR(elementID) {
         const handle = this.borrowHandle();
         const w = new BlobWriter();
         Types.string.encode(w, elementID);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 15, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 16, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -323,7 +335,7 @@ export class SwiftConvoHost {
         const w = new BlobWriter();
         Types.int32.encode(w, requestID);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 16, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 17, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -335,7 +347,7 @@ export class SwiftConvoHost {
         const w = new BlobWriter();
         Types.int32.encode(w, requestID);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 17, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 18, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -348,7 +360,7 @@ export class SwiftConvoHost {
         Types.int32.encode(w, requestID);
         Types.string.encode(w, url);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 18, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 19, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -362,7 +374,7 @@ export class SwiftConvoHost {
         Types.string.encode(w, url);
         Types.string.encode(w, body);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 19, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 20, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -375,7 +387,7 @@ export class SwiftConvoHost {
         Types.int32.encode(w, requestID);
         Types.string.encode(w, url);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 20, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 21, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -389,7 +401,7 @@ export class SwiftConvoHost {
         Types.string.encode(w, url);
         Types.string.encode(w, auth);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 21, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 22, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -401,7 +413,7 @@ export class SwiftConvoHost {
         const w = new BlobWriter();
         Types.int32.encode(w, requestID);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 22, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 23, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -416,7 +428,7 @@ export class SwiftConvoHost {
         Types.string.encode(w, bytes64);
         Types.string.encode(w, mime);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 23, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 24, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -430,7 +442,7 @@ export class SwiftConvoHost {
         Types.string.encode(w, url);
         Types.string.encode(w, body64);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 24, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 25, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -442,7 +454,7 @@ export class SwiftConvoHost {
         const w = new BlobWriter();
         Types.int32.encode(w, requestID);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 25, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 26, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -455,7 +467,7 @@ export class SwiftConvoHost {
         Types.int32.encode(w, requestID);
         Types.int32.encode(w, ms);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 26, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 27, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -467,7 +479,7 @@ export class SwiftConvoHost {
         const w = new BlobWriter();
         Types.string.encode(w, json);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 27, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 28, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -481,7 +493,7 @@ export class SwiftConvoHost {
         Types.string.encode(w, peer);
         Types.bool.encode(w, video);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 28, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 29, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -497,7 +509,7 @@ export class SwiftConvoHost {
         Types.bool.encode(w, isOffer);
         Types.bool.encode(w, video);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 29, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 30, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -509,7 +521,7 @@ export class SwiftConvoHost {
         const w = new BlobWriter();
         Types.string.encode(w, peer);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 30, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_convo_ConvoHost_invoke", handle, 31, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -613,51 +625,56 @@ export function makeDispatcher_ConvoHost(impl, runtime) {
             }
             case 15: {
                 const a0 = Types.string.decode(r);
-                impl.saveQR(a0);
+                impl.copyText(a0);
                 return new Uint8Array(0);
             }
             case 16: {
-                const a0 = Types.int32.decode(r);
-                impl.scanQR(a0);
+                const a0 = Types.string.decode(r);
+                impl.saveQR(a0);
                 return new Uint8Array(0);
             }
             case 17: {
                 const a0 = Types.int32.decode(r);
-                impl.capabilities(a0);
+                impl.scanQR(a0);
                 return new Uint8Array(0);
             }
             case 18: {
+                const a0 = Types.int32.decode(r);
+                impl.capabilities(a0);
+                return new Uint8Array(0);
+            }
+            case 19: {
                 const a0 = Types.int32.decode(r);
                 const a1 = Types.string.decode(r);
                 impl.httpGet(a0, a1);
                 return new Uint8Array(0);
             }
-            case 19: {
+            case 20: {
                 const a0 = Types.int32.decode(r);
                 const a1 = Types.string.decode(r);
                 const a2 = Types.string.decode(r);
                 impl.httpPost(a0, a1, a2);
                 return new Uint8Array(0);
             }
-            case 20: {
+            case 21: {
                 const a0 = Types.int32.decode(r);
                 const a1 = Types.string.decode(r);
                 impl.httpGetBytes(a0, a1);
                 return new Uint8Array(0);
             }
-            case 21: {
+            case 22: {
                 const a0 = Types.int32.decode(r);
                 const a1 = Types.string.decode(r);
                 const a2 = Types.string.decode(r);
                 impl.httpGetBytesSigned(a0, a1, a2);
                 return new Uint8Array(0);
             }
-            case 22: {
+            case 23: {
                 const a0 = Types.int32.decode(r);
                 impl.pickImage(a0);
                 return new Uint8Array(0);
             }
-            case 23: {
+            case 24: {
                 const a0 = Types.int32.decode(r);
                 const a1 = Types.string.decode(r);
                 const a2 = Types.string.decode(r);
@@ -665,37 +682,37 @@ export function makeDispatcher_ConvoHost(impl, runtime) {
                 impl.imageURL(a0, a1, a2, a3);
                 return new Uint8Array(0);
             }
-            case 24: {
+            case 25: {
                 const a0 = Types.int32.decode(r);
                 const a1 = Types.string.decode(r);
                 const a2 = Types.string.decode(r);
                 impl.httpPostBytes(a0, a1, a2);
                 return new Uint8Array(0);
             }
-            case 25: {
+            case 26: {
                 const a0 = Types.int32.decode(r);
                 impl.seeds(a0);
                 return new Uint8Array(0);
             }
-            case 26: {
+            case 27: {
                 const a0 = Types.int32.decode(r);
                 const a1 = Types.int32.decode(r);
                 impl.delay(a0, a1);
                 return new Uint8Array(0);
             }
-            case 27: {
+            case 28: {
                 const a0 = Types.string.decode(r);
                 impl.setIceServers(a0);
                 return new Uint8Array(0);
             }
-            case 28: {
+            case 29: {
                 const a0 = Types.int32.decode(r);
                 const a1 = Types.string.decode(r);
                 const a2 = Types.bool.decode(r);
                 impl.callStart(a0, a1, a2);
                 return new Uint8Array(0);
             }
-            case 29: {
+            case 30: {
                 const a0 = Types.int32.decode(r);
                 const a1 = Types.string.decode(r);
                 const a2 = Types.string.decode(r);
@@ -704,7 +721,7 @@ export function makeDispatcher_ConvoHost(impl, runtime) {
                 impl.callApplyRemote(a0, a1, a2, a3, a4);
                 return new Uint8Array(0);
             }
-            case 30: {
+            case 31: {
                 const a0 = Types.string.decode(r);
                 impl.callEnd(a0);
                 return new Uint8Array(0);

@@ -172,6 +172,10 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
     if (p.a11yValue !== undefined) props["aria-valuetext"] = p.a11yValue;
     if (p.a11yId !== undefined) props["data-testid"] = p.a11yId;
     if (p.a11yHidden === "1") props["aria-hidden"] = "true";
+    // `.accessibilityElement(children:)`: one element read as a whole
+    // (`.combine`: a group; `.ignore`: a leaf with its own label).
+    if (p.a11yChildren === "combine" || p.a11yChildren === "contain") props.role = props.role || "group";
+    if (p.a11yChildren === "ignore" && p.a11yLabel !== undefined) props.role = props.role || "img";
     // `.id(_:)`: what a ScrollViewProxy's scrollTo finds.
     if (p.vid !== undefined) props["data-vid"] = p.vid;
     return props;

@@ -6,7 +6,7 @@
 
 import { load } from "../app_bridge.js?v=f29c52a3";
 import { createRasterHost } from "./raster.js?v=b562f9c2";
-import { createReactTreeRenderer } from "./react_renderer.js?v=90adb77b";
+import { createReactTreeRenderer } from "./react_renderer.js?v=2ed1115c";
 import { applyPatch } from "./flat_tree.js?v=80dc009c";
 
 // `rendererName` picks the renderer (docs/renderer_layers.md): "webGPU"
@@ -466,7 +466,7 @@ export async function mountUniversalUI(container, { wasmURL, bundle, renderer = 
   container.appendChild(canvas);
 
   const result = await boot({
-    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=2623850542"),
+    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=2018913918"),
     bundle, rendererName: renderer, embedded: true, dependencies, wasi,
   });
 

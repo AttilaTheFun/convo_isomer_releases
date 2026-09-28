@@ -4,9 +4,10 @@
 // the runtime. Strings and structs copy at the boundary, so there is no
 // pointer/length or staging-buffer plumbing here.
 
-import { load } from "../app_bridge.js?v=f29c52a3";
+import { importedFilesWasi } from "./imported_files.js?v=dae098c2";
+import { load } from "../app_bridge.js?v=ca18a899";
 import { createRasterHost } from "./raster.js?v=b562f9c2";
-import { createReactTreeRenderer } from "./react_renderer.js?v=2ed1115c";
+import { createReactTreeRenderer } from "./react_renderer.js?v=8a7f4717";
 import { applyPatch } from "./flat_tree.js?v=80dc009c";
 
 // `rendererName` picks the renderer (docs/renderer_layers.md): "webGPU"
@@ -24,6 +25,10 @@ export async function boot({
   // WASI shim overrides, merged over the built-ins (extend or replace
   // individual calls — clocks, fds, … — without forking the runtime).
   wasi = undefined,
+  // Document scrolling on a phone-width page (react only): the screen's
+  // scroll is the page's own, its bars fixed over it (react_renderer.js).
+  // Also `?scroll=document` in the page's URL.
+  documentScroll = new URLSearchParams(location.search).get("scroll") === "document",
 } = {}) {
   const react = rendererName === "react";
   // SwiftGPURenderer: Swift draws through swift_gpu's executor; this page
@@ -60,23 +65,83 @@ export async function boot({
     // scrolls the page to show the focused field, carrying the pinned bars
     // off the top. Size the surface to the visual viewport instead, so the
     // bars stay and only the content between them shrinks (the iOS shape).
-    if (window.visualViewport && canvas.parentElement === document.body) {
+    if (window.visualViewport && canvas.parentElement === document.body && documentScroll) {
+      // A document-scrolled page: the surface runs on as tall as its
+      // content (the page scrolls, not the surface). Its chrome is fixed or
+      // sticky, so the browser itself keeps a focused field above the
+      // keyboard; while one is focused the home indicator's inset is dropped.
+      treeContainer.style.overflow = "visible";
+      treeContainer.style.bottom = "auto";
+      treeContainer.style.height = "auto";
+      treeContainer.style.minHeight = "100%";
+      treeContainer.dataset.uuiDocument = "1";
+      const editing = () => {
+        const active = document.activeElement;
+        return !!active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable);
+      };
+      const inset = () => treeContainer.style.setProperty("--uui-safe-bottom", editing() ? "0px" : "env(safe-area-inset-bottom, 0px)");
+      document.addEventListener("focusin", inset);
+      document.addEventListener("focusout", () => setTimeout(inset, 0));
+      inset();
+    } else if (window.visualViewport && canvas.parentElement === document.body) {
       const viewport = window.visualViewport;
       // The surface follows the keyboard both ways with the same easing
       // (Safari animates the viewport in, not out), and the home-indicator
       // inset is dropped while the keyboard covers it — nothing but the
       // page's background sits between the composer and the keys.
       treeContainer.style.transition = "height 0.25s ease-out, top 0.25s ease-out";
+      // The surface keeps running on under the keyboard: its content lays
+      // out above the keys (the keyboard's height is bottom padding), and a
+      // bottom `.safeAreaInset` reaches down into that padding, so what
+      // scrolls under the composer carries on behind the keyboard, as on
+      // an iPhone, instead of the page's plain ground.
+      treeContainer.style.boxSizing = "border-box";
+      // A Home Screen web app that draws under the status bar is told a
+      // viewport short by the status bar's height (iOS 26: innerHeight 812
+      // on an 874pt screen, leaving a blank strip at the bottom); the large
+      // viewport unit still measures the whole screen.
+      const screenProbe = document.createElement("div");
+      screenProbe.style.cssText = "position:absolute;top:0;left:0;width:0;height:100lvh;visibility:hidden;pointer-events:none";
+      document.body.appendChild(screenProbe);
+      const pageHeight = () => navigator.standalone === true
+        ? Math.max(window.innerHeight, Math.round(screenProbe.getBoundingClientRect().height))
+        : window.innerHeight;
+      // The page's height with no keyboard: the keyboard is measured
+      // against it, not against innerHeight, which on an iPhone shrinks
+      // with the visual viewport when the keyboard comes up (the simulator's
+      // doesn't) — measured that way the keyboard came out as nothing, and
+      // the composer stayed behind it.
+      const editing = () => {
+        const active = document.activeElement;
+        return !!active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable);
+      };
+      let restHeight = pageHeight();
       const fit = () => {
-        const keyboardUp = viewport.height < window.innerHeight - 120;
+        if (!editing()) restHeight = pageHeight();
+        const keyboard = Math.max(0, Math.round(restHeight - viewport.height - viewport.offsetTop));
+        const keyboardUp = editing() && keyboard > 120;
+        const lift = keyboardUp ? keyboard : 0;
+        const full = keyboardUp ? Math.round(viewport.height) : Math.max(Math.round(viewport.height), pageHeight());
         treeContainer.style.top = `${Math.max(0, viewport.offsetTop)}px`;
-        treeContainer.style.height = `${Math.round(viewport.height)}px`;
+        treeContainer.style.height = `${full + lift}px`;
         treeContainer.style.bottom = "auto";
+        treeContainer.style.paddingBottom = `${lift}px`;
+        treeContainer.style.setProperty("--uui-keyboard", `${lift}px`);
         treeContainer.style.setProperty("--uui-safe-bottom", keyboardUp ? "0px" : "env(safe-area-inset-bottom, 0px)");
         if (window.scrollY) window.scrollTo(0, 0);
       };
       viewport.addEventListener("resize", fit);
       viewport.addEventListener("scroll", fit);
+      // A field gaining or losing focus changes what the viewport means.
+      document.addEventListener("focusin", () => setTimeout(fit, 0));
+      document.addEventListener("focusout", () => setTimeout(fit, 0));
+      // The page runs the whole screen too, so nothing clips the surface
+      // at the short viewport's edge.
+      if (navigator.standalone === true) {
+        document.documentElement.style.height = "100lvh";
+        document.body.style.height = "100lvh";
+      }
+      fit();
     }
     // React-path `Map` host views: the wasm module draws real SwiftMap tiles
     // (when swift_map is linked, `--config=map`) into the page canvas through
@@ -166,6 +231,7 @@ export async function boot({
       container: treeContainer,
       sendEvent: (id, value) => bridge.uuiHostEvent(id, value),
       mapSurface,
+      documentScroll,
     });
     // Event injection for headless smoke tests (cf. __uuiHostViews).
     window.__uuiSendEvent = (id, value) => bridge.uuiHostEvent(id, value);
@@ -373,7 +439,13 @@ export async function boot({
   const module = bundle
     ? await WebAssembly.compile(bundle.wasm ?? bundle)
     : await WebAssembly.compileStreaming(fetch(wasmURL));
-  bridge = await load(module, { dependencies, wasi });
+  // Picked and dropped files live in an in-memory directory the guest's
+  // Foundation reads through WASI; a page's own overrides go on top.
+  const wasiWithFiles = (getMemory) => ({
+    ...importedFilesWasi(getMemory),
+    ...(typeof wasi === "function" ? wasi(getMemory) : (wasi || {})),
+  });
+  bridge = await load(module, { dependencies, wasi: wasiWithFiles });
   if (gpuHost) {
     bridge.gpuConnect(gpuHost); // swift_gpu's WebGPU executor
     bridge.uuiSetDisplayScale(window.devicePixelRatio || 1);
@@ -466,7 +538,7 @@ export async function mountUniversalUI(container, { wasmURL, bundle, renderer = 
   container.appendChild(canvas);
 
   const result = await boot({
-    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=356762047"),
+    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=691636620"),
     bundle, rendererName: renderer, embedded: true, dependencies, wasi,
   });
 

@@ -13,26 +13,29 @@
 // from the hermetic @react_umd repositories next to this bundle.
 
 import { SYMBOLS } from "./symbols.js?v=6a64d280";
+import { storeFiles } from "./imported_files.js?v=dae098c2";
 
 /// An SF Symbol drawn from the portable table as an inline SVG sized to
 /// the text it stands in (an `Image(systemName:)` is a text node carrying
 /// `params.symbol`); unknown names keep the guest's fallback glyph.
-function symbolSVG(h, name, size, color, weight, extraStyle) {
+function symbolSVG(h, name, size, color, weight, extraStyle, secondary) {
   const entry = SYMBOLS[name];
   if (!entry) return null;
   const px = Math.round((Number(size) || 17) * 1.15);
   const bold = Number(weight) >= 600;
   return h("svg", {
     viewBox: "0 0 24 24", width: px, height: px, "aria-hidden": "true",
-    fill: entry.fill ? "currentColor" : "none", stroke: "currentColor",
+    // With a secondary style (`.foregroundStyle(_:_:)`) a filled badge takes
+    // it, and its glyph the primary colour.
+    fill: entry.fill ? (secondary && entry.inner ? secondary : "currentColor") : "none", stroke: secondary && entry.inner ? secondary : "currentColor",
     strokeWidth: entry.fill ? 1.5 : (bold ? 2.4 : 2), strokeLinecap: "round", strokeLinejoin: "round",
     style: { display: "inline-block", verticalAlign: "-0.2em", color, flexShrink: 0, ...extraStyle },
   }, h("path", { key: "d", d: entry.d }),
      // A filled badge's glyph, in the colour the fill contrasts with.
-     entry.inner ? h("path", { key: "i", d: entry.inner, fill: "none", stroke: "var(--uui-symbol-contrast, #fff)", strokeWidth: 2.2 }) : null);
+     entry.inner ? h("path", { key: "i", d: entry.inner, fill: "none", stroke: secondary ? "currentColor" : "var(--uui-symbol-contrast, #fff)", strokeWidth: 2.2 }) : null);
 }
 
-export function createReactTreeRenderer({ container, sendEvent, assetBase = "assets/", mapSurface = null }) {
+export function createReactTreeRenderer({ container, sendEvent, assetBase = "assets/", mapSurface = null, documentScroll = false }) {
   const R = window.React;
   const SYSTEM_FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
   const MONO_FONT = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
@@ -77,8 +80,16 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
       // The page itself never scrolls or rubber-bands (a phone browser's
       // overscroll dragged the bars with the document); only our scroll
       // containers scroll, and they do not chain to the page at their ends.
-      "html{overscroll-behavior:none;overflow:hidden;height:100%}" +
-      "body{overscroll-behavior:none;overflow:hidden;position:fixed;inset:0;width:100%;height:100dvh;margin:0}" +
+      // A document-scrolled page is the exception: the page is what scrolls.
+      (documentScroll
+        ? "html{height:100%}body{margin:0;min-height:100%}" +
+          // Everything around the document-scrolled screen's scroll takes
+          // its content's height (at least the viewport's), so the page is
+          // as long as the screen's content and sticky chrome in it travels
+          // the whole page.
+          "[data-uui-document] :has([data-document-scroll]){flex:1 0 auto!important;min-height:auto!important;height:auto!important;max-height:none!important}"
+        : "html{overscroll-behavior:none;overflow:hidden;height:100%}" +
+          "body{overscroll-behavior:none;overflow:hidden;position:fixed;inset:0;width:100%;height:100dvh;margin:0}") +
       "[data-edge-scroll],.uui-sheet-body,[data-uui-scroll]{overscroll-behavior:contain}" +
       ".uui-no-sep::after{display:none!important}" +
       // A grouped cell's fill, for a list outside a grouped container too
@@ -106,6 +117,9 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
     c ? `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${c[3]})` : undefined;
 
   const alignCSS = { leading: "flex-start", center: "center", trailing: "flex-end", top: "flex-start", bottom: "flex-end" };
+
+  // The frost of materials and bar buttons.
+  const MATERIAL_BLUR = "blur(14px)";
 
   function gradientCSS(n) {
     if (!n.gradient) return undefined;
@@ -149,6 +163,15 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
     if (n.opacity != null) s.opacity = n.opacity;
     if (n.shadow) {
       s.boxShadow = `${n.shadow.x}px ${n.shadow.y}px ${n.shadow.radius * 2}px ${rgba(n.shadow.color)}`;
+    }
+    // A `Material` / `.glassEffect` fill: its tint over a blur of what lies
+    // behind, with a hairline — the bar buttons' material.
+    if (n.gradient && n.gradient.indexOf('"material"') >= 0) {
+      const dark = pageDark();
+      s.backdropFilter = MATERIAL_BLUR;
+      s.WebkitBackdropFilter = MATERIAL_BLUR;
+      const hairline = `inset 0 0 0 1px ${dark ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.08)"}`;
+      s.boxShadow = [hairline, s.boxShadow || (dark ? "0 1px 6px rgba(0,0,0,0.25)" : "0 1px 6px rgba(0,0,0,0.08)")].join(",");
     }
     if (n.tap) s.cursor = "pointer";
     // Visual transforms (.offset / .scaleEffect): per-frame values from the
@@ -206,28 +229,94 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
         width: "auto", height: "auto", flex: "none",
       };
     }
-    if (n.drag) {
-      // A guest DragGesture: pointer capture, translation reported as
-      // "changed:x,y" while moving and "ended:x,y" on release.
+    const magnify = (n.params || {}).magnify;
+    if (n.drag || magnify) {
+      // A guest `.gesture`: pointer capture; the drag reports the pointers'
+      // travel ("changed:x,y" / "ended:x,y") and a pinch the spread of two
+      // fingers since it began ("changed:m" / "ended:m"). A trackpad pinch
+      // arrives as ctrl+wheel, and ends once it pauses.
+      if (magnify) s.touchAction = "none";
+      const state = (el) => (el.__uuiGesture ||= { points: new Map(), start: null, spread: null, zoom: 1, moved: { x: 0, y: 0 } });
+      const centroid = (points) => {
+        let x = 0, y = 0;
+        for (const p of points.values()) { x += p.x; y += p.y; }
+        return { x: x / points.size, y: y / points.size };
+      };
+      const spread = (points) => {
+        const [a, b] = [...points.values()];
+        return Math.hypot(a.x - b.x, a.y - b.y);
+      };
       props.onPointerDown = (e) => {
+        const st = state(e.currentTarget);
         e.currentTarget.setPointerCapture(e.pointerId);
-        e.currentTarget.__uuiDragStart = { x: e.clientX, y: e.clientY };
+        st.points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const c = centroid(st.points);
+        // A finger joining or leaving restarts the reference points, so the
+        // translation carries on from where it was.
+        st.start = { x: c.x - st.moved.x, y: c.y - st.moved.y };
+        if (st.points.size === 2) st.spread = { base: spread(st.points), zoom: st.zoom };
       };
       props.onPointerMove = (e) => {
-        const start = e.currentTarget.__uuiDragStart;
-        if (!start) return;
-        sendEvent(n.drag, `changed:${e.clientX - start.x},${e.clientY - start.y}`);
+        const st = e.currentTarget.__uuiGesture;
+        if (!st || !st.points.has(e.pointerId)) return;
+        st.points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const c = centroid(st.points);
+        st.moved = { x: c.x - st.start.x, y: c.y - st.start.y };
+        if (n.drag) sendEvent(n.drag, `changed:${st.moved.x},${st.moved.y}`);
+        if (magnify && st.points.size === 2 && st.spread && st.spread.base > 0) {
+          st.zoom = st.spread.zoom * spread(st.points) / st.spread.base;
+          sendEvent(magnify, `changed:${st.zoom}`);
+        }
       };
       const end = (e) => {
-        const start = e.currentTarget.__uuiDragStart;
-        if (!start) return;
-        e.currentTarget.__uuiDragStart = null;
-        sendEvent(n.drag, `ended:${e.clientX - start.x},${e.clientY - start.y}`);
+        const st = e.currentTarget.__uuiGesture;
+        if (!st || !st.points.has(e.pointerId)) return;
+        st.points.delete(e.pointerId);
+        if (st.points.size > 0) {
+          const c = centroid(st.points);
+          st.start = { x: c.x - st.moved.x, y: c.y - st.moved.y };
+          st.spread = null;
+          return;
+        }
+        if (n.drag) sendEvent(n.drag, `ended:${st.moved.x},${st.moved.y}`);
+        if (magnify) sendEvent(magnify, `ended:${st.zoom}`);
+        e.currentTarget.__uuiGesture = null;
       };
       props.onPointerUp = end;
       props.onPointerCancel = end;
+      if (magnify) {
+        props.onWheel = (e) => {
+          if (!e.ctrlKey) return;
+          e.preventDefault();
+          const el = e.currentTarget;
+          const st = state(el);
+          st.zoom *= Math.exp(-e.deltaY / 100);
+          sendEvent(magnify, `changed:${st.zoom}`);
+          clearTimeout(st.wheelEnd);
+          st.wheelEnd = setTimeout(() => { sendEvent(magnify, `ended:${st.zoom}`); el.__uuiGesture = null; }, 150);
+        };
+      }
     }
-    if (n.tap) {
+    // `.dropDestination`: files dragged over and dropped on the view.
+    const drop = (n.params || {}).drop;
+    if (drop) {
+      const carriesFiles = (e) => Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes("Files");
+      props.onDragOver = (e) => { if (carriesFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } };
+      props.onDragEnter = (e) => { if (carriesFiles(e)) sendEvent(drop, "over:1"); };
+      props.onDragLeave = (e) => { if (!e.currentTarget.contains(e.relatedTarget)) sendEvent(drop, "over:0"); };
+      props.onDrop = async (e) => {
+        if (!carriesFiles(e)) return;
+        e.preventDefault();
+        sendEvent(drop, "over:0");
+        const paths = await storeFiles(e.dataTransfer.files);
+        if (paths.length) sendEvent(drop, paths.join("\n"));
+      };
+    }
+    if (n.tap && (n.params || {}).tapCount === "2") {
+      // `onTapGesture(count: 2)`: a double tap.
+      props["data-tap"] = n.tap;
+      props.onDoubleClick = () => sendEvent(n.tap, "");
+    } else if (n.tap) {
       props["data-tap"] = n.tap; // exposed for headless smoke tests
       props.onClick = (e) => {
         e.stopPropagation();
@@ -613,7 +702,7 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
       // hairline, in the label colour (no liquid glass).
       border: `1px solid ${dark ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.08)"}`,
       background: dark ? "rgba(60,60,67,0.55)" : "rgba(255,255,255,0.72)",
-      backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
+      backdropFilter: MATERIAL_BLUR, WebkitBackdropFilter: MATERIAL_BLUR,
       color: dark ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.88)", fontSize: 17,
       fontWeight: 500, cursor: "pointer", padding: "0 17px", borderRadius: 22, flex: "0 0 auto",
       minWidth: 44, height: 44, lineHeight: "42px", margin: "0 2px", boxSizing: "border-box",
@@ -662,8 +751,12 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
           ? h("span", { key: "lt", style: { fontWeight: 600, fontSize: 15, padding: "0 6px", whiteSpace: "nowrap" } }, p.title)
           : null,
         p.back === "1"
-          ? h("button", { key: "back", className: "uui-bar-item", style: { ...button, display: "inline-flex", alignItems: "center", gap: 2, paddingLeft: desktop ? 6 : 10, paddingRight: desktop ? 9 : 14 }, onClick: () => (n.onBack ? n.onBack() : sendEvent(n.edit, "back")) },
-              symbolSVG(h, "chevron.left", desktop ? 17 : 20, "currentColor", 600, { verticalAlign: "0" }), "Back")
+          // iOS 26's Back: the chevron alone in a round button (its title
+          // is for assistive tech); the desktop keeps the word.
+          ? h("button", { key: "back", className: "uui-bar-item", "aria-label": "Back",
+              style: desktop ? { ...button, display: "inline-flex", alignItems: "center", gap: 2, paddingLeft: 6, paddingRight: 9 } : circle,
+              onClick: () => (n.onBack ? n.onBack() : sendEvent(n.edit, "back")) },
+              symbolSVG(h, "chevron.left", desktop ? 17 : 21, "currentColor", 600, { verticalAlign: "0" }), desktop ? "Back" : null)
           : null,
         leading.map((title, i) => h("button", {
           key: `l${i}`, className: "uui-bar-item", style: itemStyle(leadingSymbols[i]), "aria-label": leadingLabels[i] || undefined,
@@ -779,20 +872,29 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
       rows.push(h(pinned ? "div" : R.Fragment, pinned ? {
         key: "bar",
         style: {
-          position: "absolute", top: 0, left: 0, right: 0, zIndex: 5, overflow: "visible",
-          paddingTop: "env(safe-area-inset-top, 0px)", boxSizing: "border-box",
+          // Fixed over a document-scrolled page, which scrolls under it.
+          position: docScroll() ? "fixed" : "absolute", top: 0, left: 0, right: 0, zIndex: 5, overflow: "visible",
+          ...(docScroll() ? { textShadow: `0 0 10px ${dark ? "#000" : "#fff"}, 0 0 4px ${dark ? "#000" : "#fff"}` } : {}),
+          paddingTop: SAFE_TOP, boxSizing: "border-box",
         },
       } : { key: "bar" },
         // The scroll-edge effect: content passing under the bar is frosted
         // by a layer of its own that fades out at the bottom, so the bar
         // has no fill, no hairline and no hard edge over the first row.
-        pinned ? h("div", {
+        // (Not on a document-scrolled page: Safari paints its status bar
+        // solid behind any fixed chrome with a fill or a backdrop blur at
+        // the page's top edge, hiding the content that should run under it;
+        // there the bar is its buttons and title alone, the title with a
+        // halo, and Safari's own scroll edge frosts the top.)
+        pinned && !docScroll() ? h("div", {
           key: "frost",
           style: {
             position: "absolute", inset: 0, pointerEvents: "none",
-            backdropFilter: "blur(18px) saturate(1.3)", WebkitBackdropFilter: "blur(18px) saturate(1.3)",
-            maskImage: "linear-gradient(to bottom, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)",
-            WebkitMaskImage: "linear-gradient(to bottom, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)",
+            // From the top of the screen (the status bar's safe area) to
+            // the bottom of the bar, easing out: soft enough that the
+            // content still reads through it near the bar's lower edge.
+            backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)",
+            maskImage: FROST_MASK, WebkitMaskImage: FROST_MASK,
           },
         }) : null,
         navBar({
@@ -860,11 +962,17 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
     }
     if (pinned) {
       // remount per level: a push swaps the screen
-      rows.push(insetContent(`content:${depth}`, kids, ownsEdgeScroll));
+      rows.push(insetContent(`content:${depth}`, kids, ownsEdgeScroll, true));
     } else {
+      // The bar and title rows start below the status bar (a home-screen
+      // web app draws under it); what they sit over is below it already.
+      if (rows.length) rows.unshift(h("div", { key: "safe-top", style: { height: SAFE_TOP, flex: "none" } }));
       rows.push(h("div", {
         key: `content:${depth}`, // remount per level: a push swaps the screen
-        style: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0, alignSelf: "stretch" },
+        style: {
+          display: "flex", flexDirection: "column", flex: 1, minHeight: 0, alignSelf: "stretch",
+          ...(rows.length > 1 ? { "--uui-safe-top": "0px" } : {}),
+        },
       }, kids));
     }
     return h("div", {
@@ -874,7 +982,7 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
         display: "flex", flexDirection: "column", flex: 1, position: "relative",
         minHeight: 0, minWidth: 0, alignSelf: "stretch", width: "100%",
         color: dark ? "rgba(255,255,255,0.92)" : "rgba(0,0,0,0.85)",
-        ...(pinned ? { "--uui-inset-top": "calc(52px + env(safe-area-inset-top, 0px))" } : {}),
+        ...(pinned ? { "--uui-inset-top": `calc(52px + ${SAFE_TOP})` } : {}),
       },
     }, rows);
   }
@@ -1127,8 +1235,10 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
     const lastPane = paneCount - 1;
     const [pane, setPaneState] = R.useState(Math.min(preferredPane ?? 0, lastPane));
     const setPane = (next) => {
+      // ":back" when the pane went back: the guest clears the selections
+      // past it, as SwiftUI's compact split does.
+      if (edit) sendEvent(edit, "compact:" + paneNames[next] + (next < pane ? ":back" : ""));
       setPaneState(next);
-      if (edit) sendEvent(edit, "compact:" + paneNames[next]);
     };
     // The guest asks to advance when a column's List selection changes (a
     // row tap or a programmatic selection) — SwiftUI's phone behavior.
@@ -1308,6 +1418,9 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
   // (`--uui-inset-top/bottom`) from the chrome's container to the scroll,
   // which consumes them as padding and zeroes them for its descendants.
   // Content that is not a scroll is simply laid out inside the insets.
+  // The scroll-edge frost's fade: whole under the status bar and the top of
+  // the bar, then easing to nothing at the bar's bottom edge.
+  const FROST_MASK = "linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.45) 75%, rgba(0,0,0,0) 100%)";
   const BAR_BACKGROUND = (dark) => dark ? "rgba(28,28,30,0.82)" : "rgba(249,249,249,0.82)";
   // Apple's grouped palette (systemGroupedBackground,
   // secondarySystemGroupedBackground, separator).
@@ -1324,6 +1437,16 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
   const isDesktop = () => window.innerWidth >= 700;
   // How many split-view sidebar columns enclose the rows being rendered.
   let inSidebar = 0;
+  // Document scrolling (a phone-width page, opted in with `documentScroll`):
+  // the screen's edge scroll is the page's own scroll, as a web page's is —
+  // the browser scrolls the document (its bars collapse, content runs under
+  // them and behind the keyboard), and the screen's chrome is fixed over it.
+  // Presentations (sheets) keep scrolling inside themselves.
+  let presentationDepth = 0;
+  const docScroll = () => documentScroll && !isDesktop() && presentationDepth === 0;
+  // Where each document-scrolled screen was, by its scroll's identity, so
+  // moving between screens (they share the page's one scroll) comes back.
+  const documentScrollPositions = new Map();
   // The list idiom the rows being rendered belong to ("insetGrouped" while
   // a compact list's rows render, as on an iPhone; "sidebar" in a wide
   // split view's sidebar column; plain rows otherwise).
@@ -1331,6 +1454,9 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
   // `.listRowSeparator(.hidden)`: no lines between the rows of this list.
   let currentListSeparators = true;
   const INSET_TOP = "var(--uui-inset-top, 0px)";
+  // The top safe area a pinned bar reaches into: the screen's (the status
+  // bar), except in a sheet, whose top edge is below it.
+  const SAFE_TOP = "var(--uui-safe-top, env(safe-area-inset-top, 0px))";
   const INSET_BOTTOM = "var(--uui-inset-bottom, 0px)";
   const edgeScrolls = new WeakSet();
   // Custom properties resolve on the element that declares them, so a box
@@ -1350,6 +1476,14 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
       // `.background` / `.overlay` layers ride alongside the content.
       const ch = (node.ch || []).filter((c) => !(c.params && c.params.layer));
       if (node.k === "stack" && p.inset) { node = ch[p.inset === "top" ? 1 : 0]; continue; }
+      // A ZStack of a backdrop (a colour or shape filling the screen) and
+      // the content: the backdrop sits under the chrome with the rest.
+      if (node.k === "stack" && node.axis === "z") {
+        const content = ch.filter((c) => c.k !== "shape" && c.k !== "gradient");
+        if (content.length !== 1) return null;
+        node = content[0];
+        continue;
+      }
       if (node.k === "box" || (node.k === "stack" && node.axis === "v")) {
         if (ch.length !== 1) return null;
         node = ch[0];
@@ -1368,10 +1502,12 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
   // The content side of pinned chrome: fills the container; unless its
   // content is an edge scroll (which takes the insets as padding), the
   // insets become the content's own padding.
-  function insetContent(key, kids, hasEdgeScroll) {
+  function insetContent(key, kids, hasEdgeScroll, belowTopChrome) {
     const style = {
       display: "flex", flexDirection: "column", flex: 1, minHeight: 0, minWidth: 0,
       alignSelf: "stretch", width: "100%", position: "relative", boxSizing: "border-box",
+      // Chrome at the top took the status bar's safe area.
+      ...(belowTopChrome ? { "--uui-safe-top": "0px" } : {}),
     };
     if (!hasEdgeScroll) {
       style.paddingTop = INSET_TOP;
@@ -1383,12 +1519,13 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
   // `.safeAreaInset(edge: .bottom/.top)`: the inset is chrome pinned at
   // that edge (translucent, extending into the device's safe area); its
   // measured height is the inset the content beneath it flows under.
-  function InsetStack({ n, style, kids, edge, hasEdgeScroll }) {
+  function InsetStack({ n, style, kids, edge, hasEdgeScroll, fixed }) {
     const ref = R.useRef(null);
     const barRef = R.useRef(null);
     R.useLayoutEffect(() => {
       const container = ref.current, bar = barRef.current;
-      if (!container || !bar) return undefined;
+      // Document-scrolled, the bar is in the page's flow (sticky): no inset.
+      if (!container || !bar || fixed) return undefined;
       const name = edge === "top" ? "--uui-inset-top" : "--uui-inset-bottom";
       const apply = () => container.style.setProperty(name, `${bar.getBoundingClientRect().height}px`);
       apply();
@@ -1396,33 +1533,58 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
       const observer = new ResizeObserver(apply);
       observer.observe(bar);
       return () => observer.disconnect();
-    }, [edge]);
+    }, [edge, fixed]);
     const contentIndex = edge === "top" ? 1 : 0;
     const insetIndex = edge === "top" ? 0 : 1;
     const bar = h("div", {
       key: "inset",
       ref: barRef,
       style: {
-        position: "absolute", left: 0, right: 0, zIndex: 5,
+        // On a document-scrolled page the bar is in the page's flow, after
+        // (or before) the content, and sticks to the viewport's edge as the
+        // page scrolls; at the page's end it rests there, and a focused
+        // field in it is scrolled above the keyboard by the browser itself.
+        position: fixed ? "sticky" : "absolute", left: 0, right: 0, zIndex: 5,
         [edge === "top" ? "top" : "bottom"]: 0,
         display: "flex", flexDirection: "column", alignItems: "stretch",
         boxSizing: "border-box",
-        [edge === "top" ? "paddingTop" : "paddingBottom"]: `env(safe-area-inset-${edge}, 0px)`,
+        // The bottom one sits on the keyboard when it is up (the surface
+        // pads the keyboard's height; this stack reaches down into it).
+        [edge === "top" ? "paddingTop" : "paddingBottom"]: edge === "top"
+          ? SAFE_TOP
+          : "calc(var(--uui-keyboard, 0px) + var(--uui-safe-bottom, env(safe-area-inset-bottom, 0px)))",
         // No fill of its own: as on iOS, the inset's content draws what it
         // wants (a composer pill), and the scroll shows through around it.
       },
     }, kids[insetIndex]);
+    if (fixed) {
+      // As tall as the content plus the bar (not the viewport): the page
+      // scrolls through it, with the bar stuck to the viewport's edge. At
+      // least the viewport's height, so a short screen's bar still sits at
+      // the bottom.
+      const content = h("div", { key: "content", style: { display: "flex", flexDirection: "column", flex: "1 0 auto", minWidth: 0, width: "100%", "--uui-inset-bottom": "0px" } }, kids[contentIndex]);
+      return h("div", {
+        ref,
+        style: {
+          ...style, flex: "none", height: "auto", minHeight: "100%", display: "flex", flexDirection: "column",
+          position: "relative", minWidth: 0, alignSelf: "stretch",
+        },
+      }, edge === "top" ? [bar, content] : [content, bar]);
+    }
     return h("div", {
       ref,
-      style: { ...style, display: "flex", flexDirection: "column", position: "relative", minHeight: 0, minWidth: 0 },
-    }, insetContent("content", kids[contentIndex], hasEdgeScroll), bar);
+      style: {
+        ...style, display: "flex", flexDirection: "column", position: "relative", minHeight: 0, minWidth: 0,
+        ...(edge === "bottom" ? { marginBottom: "calc(-1 * var(--uui-keyboard, 0px))" } : {}),
+      },
+    }, insetContent("content", kids[contentIndex], hasEdgeScroll, edge === "top"), bar);
   }
 
   // `ScrollViewProxy.scrollTo(id, anchor:)`: the core sends the latest
   // request ("id|tick|anchor") to every scroll; the one holding a view with
   // that id brings it to the anchor, once per request, after the render
   // that carries it has laid out.
-  function applyScrollRequest(el, request, applied) {
+  function applyScrollRequest(el, request, applied, doc) {
     if (!el || !request) return;
     const [target, tick, anchor] = request.split("|");
     if (applied.current === tick) return;
@@ -1434,7 +1596,8 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
     // chrome over the scroll reserves (a bar, the composer), as iOS measures
     // inside the content insets.
     const cs = getComputedStyle(el);
-    const outer = el.getBoundingClientRect();
+    // A document-scrolled screen is measured against the window.
+    const outer = doc ? { top: 0, bottom: window.innerHeight } : el.getBoundingClientRect();
     const box = { top: outer.top + (parseFloat(cs.scrollPaddingTop) || 0), bottom: outer.bottom - (parseFloat(cs.scrollPaddingBottom) || 0) };
     box.height = box.bottom - box.top;
     const r = node.getBoundingClientRect();
@@ -1443,13 +1606,14 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
     else if (anchor === "top") delta = r.top - box.top;
     else if (anchor === "center") delta = (r.top + r.height / 2) - (box.top + box.height / 2);
     else delta = r.top < box.top ? r.top - box.top : (r.bottom > box.bottom ? r.bottom - box.bottom : 0);
-    el.scrollTop += delta;
+    if (doc) window.scrollBy(0, delta);
+    else el.scrollTop += delta;
   }
 
   // A lazy List: report the rows on screen ("first,last" among the list's
   // cells) after each render and as it scrolls, so the guest builds the
   // rows around them.
-  function useListWindow(ref, windowId) {
+  function useListWindow(ref, windowId, doc) {
     const reported = R.useRef("");
     const pending = R.useRef(false);
     const report = () => {
@@ -1457,7 +1621,7 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
       if (!el || !windowId) return;
       const cells = [...el.querySelectorAll("[data-uui-cell]")].filter((c) => c.closest("[data-uui-scroll]") === el);
       if (!cells.length) return;
-      const box = el.getBoundingClientRect();
+      const box = doc ? { top: 0, bottom: window.innerHeight } : el.getBoundingClientRect();
       // Binary search: the first cell reaching below the top, the last
       // starting above the bottom.
       const firstBelow = (y) => {
@@ -1481,25 +1645,47 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
     };
   }
 
-  function RequestedScroll({ divProps, children, request, windowId }) {
+  function RequestedScroll({ divProps, children, request, windowId, doc, id }) {
     const ref = R.useRef(null);
     const applied = R.useRef(null);
-    R.useLayoutEffect(() => applyScrollRequest(ref.current, request, applied));
-    const onWindowScroll = useListWindow(ref, windowId);
+    R.useLayoutEffect(() => applyScrollRequest(ref.current, request, applied, doc));
+    const onWindowScroll = useListWindow(ref, windowId, doc);
+    // Document-scrolled: the page's scroll is this screen's while it is
+    // shown — back where it was, and reporting as the page scrolls.
+    R.useLayoutEffect(() => {
+      if (!doc) return undefined;
+      window.scrollTo(0, documentScrollPositions.get(id) || 0);
+      const onScroll = () => { documentScrollPositions.set(id, window.scrollY); onWindowScroll(); };
+      window.addEventListener("scroll", onScroll, { passive: true });
+      return () => window.removeEventListener("scroll", onScroll);
+    }, [doc, id]);
     const onScroll = divProps.onScroll;
     return h("div", { ...divProps, ref, onScroll: (e) => { if (onScroll) onScroll(e); onWindowScroll(); } }, children);
   }
 
-  function BottomAnchoredScroll({ divProps, children, request, windowId }) {
+  function BottomAnchoredScroll({ divProps, children, request, windowId, doc }) {
     const ref = R.useRef(null);
     const applied = R.useRef(null);
-    R.useLayoutEffect(() => applyScrollRequest(ref.current, request, applied));
-    const onWindowScroll = useListWindow(ref, windowId);
+    R.useLayoutEffect(() => applyScrollRequest(ref.current, request, applied, doc));
+    const onWindowScroll = useListWindow(ref, windowId, doc);
     const pinned = R.useRef(true);
     const pin = () => {
       const el = ref.current;
-      if (el && pinned.current) el.scrollTop = el.scrollHeight;
+      if (!el || !pinned.current) return;
+      if (doc) window.scrollTo(0, document.documentElement.scrollHeight);
+      else el.scrollTop = el.scrollHeight;
     };
+    // Document-scrolled: the page's scroll moves the pin.
+    R.useEffect(() => {
+      if (!doc) return undefined;
+      const onScroll = () => {
+        const page = document.documentElement;
+        pinned.current = window.scrollY + window.innerHeight >= page.scrollHeight - 4;
+        onWindowScroll();
+      };
+      window.addEventListener("scroll", onScroll, { passive: true });
+      return () => window.removeEventListener("scroll", onScroll);
+    }, [doc]);
     R.useLayoutEffect(pin);
     // The viewport shrinking (the soft keyboard) resizes the scroll without
     // a re-render: stay at the bottom through that too, as Messages does.
@@ -1507,14 +1693,19 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
       const el = ref.current;
       if (!el) return undefined;
       const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(pin);
-      if (observer) observer.observe(el);
+      if (observer) {
+        observer.observe(el);
+        // Document-scrolled, the scroll keeps the viewport's size while its
+        // content grows past it: follow the content.
+        if (doc) for (const child of el.children) observer.observe(child);
+      }
       const viewport = window.visualViewport;
       if (viewport) viewport.addEventListener("resize", pin);
       return () => {
         if (observer) observer.disconnect();
         if (viewport) viewport.removeEventListener("resize", pin);
       };
-    }, []);
+    }, [doc]);
     return h("div", {
       ...divProps,
       ref,
@@ -1817,12 +2008,80 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
     });
   }
 
+  // A request presentation: the browser's own picker (a file input, with
+  // `capture` for the camera), answered with the stored files' paths ("" when
+  // cancelled). Nothing is drawn.
+  function PickerRequest({ n }) {
+    R.useEffect(() => {
+      const p = n.params || {};
+      const input = document.createElement("input");
+      input.type = "file";
+      if (p.accept && p.accept !== "*/*") input.accept = p.accept;
+      if (p.multiple === "1") input.multiple = true;
+      if (p.request === "camera") input.capture = "environment";
+      input.style.display = "none";
+      let answered = false;
+      const answer = (value) => {
+        if (answered) return;
+        answered = true;
+        input.remove();
+        sendEvent(p.result, value);
+      };
+      input.addEventListener("change", async () => {
+        let files = Array.from(input.files || []);
+        const max = Number(p.max || 0);
+        if (max > 0) files = files.slice(0, max);
+        answer((await storeFiles(files)).join("\n"));
+      });
+      input.addEventListener("cancel", () => answer(""));
+      document.body.appendChild(input);
+      input.click();
+      return () => { if (!answered) input.remove(); };
+    }, []);
+    return null;
+  }
+
+  // The fill of the backdrop a content paints behind itself (a Form's
+  // grouped ground: a full-bleed shape under its scroll in a ZStack),
+  // through plain wrappers and a navigation stack.
+  function backdropFill(start) {
+    let node = start;
+    for (let depth = 0; node && depth < 10; depth++) {
+      const ch = (node.ch || []).filter((c) => !(c.params && c.params.layer));
+      if (node.k === "hostView" && node.view === "navstack") { node = ch[0]; continue; }
+      if (node.k === "stack" && node.axis === "z") {
+        const first = ch[0];
+        return first && first.k === "shape" && first.expandH && first.fill ? rgba(first.fill) : null;
+      }
+      if ((node.k === "box" || (node.k === "stack" && node.axis === "v")) && ch.length === 1) { node = ch[0]; continue; }
+      return null;
+    }
+    return null;
+  }
+
+  // Whether a presentation's content is a grouped list (through its
+  // navigation stack and plain wrappers).
+  function sheetHoldsGroupedList(n) {
+    let content = (n.ch || [])[0];
+    if (content && content.k === "hostView" && content.view === "navstack") content = (content.ch || [])[0];
+    const scroll = edgeScroll(content);
+    const p = (scroll && scroll.params) || {};
+    return !!p.list && p.listStyle !== "plain";
+  }
+
   function presentation(n, kids) {
+    if ((n.params || {}).request) return h(PickerRequest, { key: n.dismiss, n });
     const isAlert = n.style === "alert";
     // Panel chrome colors ride the node, scheme-resolved by the serializer
     // (Color.secondaryBackground / Color.primary) — never hardcode a light
     // palette here, or dark-scheme presented content renders white-on-white.
-    const panelBg = rgba(n.bg) || "#fff";
+    // A sheet is its content's ground all the way up, behind the grabber
+    // too, as an iPhone draws it: a Form's grouped backdrop, or a grouped
+    // list's.
+    const backdrop = n.style !== "alert" ? backdropFill((n.ch || [])[0]) : null;
+    const panelBg = backdrop
+      || (n.style !== "alert" && sheetHoldsGroupedList(n) ? (pageDark() ? "#1c1c1e" : GROUPED_BACKGROUND(false)) : null)
+      || rgba(n.bg) || "#fff";
     const headColor = n.color ? rgba(n.color) : undefined;
     const messageColor = n.color
       ? rgba([n.color[0], n.color[1], n.color[2], n.color[3] * 0.65])
@@ -1945,7 +2204,7 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
       style: panelStyle,
     }, grabber ? h("div", { key: "grab", style: { alignSelf: "center", width: 36, height: 5, borderRadius: 3, background: "rgba(120,120,128,0.45)", margin: "6px 0 2px", flex: "none" } }) : null,
        // The body keeps the home indicator's inset below its last row.
-       h("div", { key: "body", className: "uui-sheet-body", style: { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", alignItems: "stretch", overflowY: greedy ? "hidden" : "auto", "--uui-inset-bottom": compact ? "var(--uui-safe-bottom, env(safe-area-inset-bottom, 0px))" : "0px" } }, kids)));
+       h("div", { key: "body", className: "uui-sheet-body", style: { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", alignItems: "stretch", overflowY: greedy ? "hidden" : "auto", "--uui-safe-top": "0px", ...(pageDark() ? { "--uui-sheet-grouped-bg": "#1c1c1e", "--uui-sheet-cell-bg": "#2c2c2e" } : {}), "--uui-inset-bottom": compact ? "var(--uui-safe-bottom, env(safe-area-inset-bottom, 0px))" : "0px" } }, kids)));
   }
 
   let renderDepth = 0;
@@ -1980,10 +2239,13 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
 
   function render(n, key, parentAxis) {
     renderDepth += 1;
+    const presented = n.k === "presentation";
+    if (presented) presentationDepth += 1;
     try {
       return renderNode(n, key, parentAxis);
     } finally {
       renderDepth -= 1;
+      if (presented) presentationDepth -= 1;
     }
   }
 
@@ -2162,7 +2424,7 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
     switch (n.k) {
       case "stack": {
         if ((n.params || {}).inset && kids.length === 2) {
-          return h(InsetStack, { key, n, style: s, kids, edge: n.params.inset, hasEdgeScroll: ownsEdgeScroll });
+          return h(InsetStack, { key, n, style: s, kids, edge: n.params.inset, hasEdgeScroll: ownsEdgeScroll, fixed: docScroll() && ownsEdgeScroll });
         }
         if (n.axis === "z") {
           // Layers stretch over the whole stack; each aligns its child by
@@ -2240,7 +2502,7 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
           s.overflow = "hidden";
         }
         if ((n.params || {}).symbol) {
-          const svg = symbolSVG(h, n.params.symbol, n.size, s.color, n.weight);
+          const svg = symbolSVG(h, n.params.symbol, n.size, s.color, n.weight, undefined, n.params.symbol2);
           if (svg) {
             s.display = "inline-flex"; s.alignItems = "center"; s.justifyContent = "center"; s.lineHeight = 1;
             return h("span", props, svg);
@@ -2259,11 +2521,36 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
         s.background = "rgba(120,120,128,0.3)";
         return h("div", props);
       case "scroll":
-        s.flex = "1 1 0";
-        s.alignSelf = "stretch";
-        s.minHeight = 0;
-        s.minWidth = 0;
-        s[n.axis === "h" ? "overflowX" : "overflowY"] = "auto";
+        if (n.axis === "h") {
+          // A horizontal scroll is as tall as its content (a strip of
+          // thumbnails in a column), and takes the width it is given.
+          s.flex = "0 0 auto";
+          s.alignSelf = "stretch";
+          s.minWidth = 0;
+          s.maxWidth = "100%";
+          s.overflowX = "auto";
+          s.overflowY = "hidden";
+          // Its content starts at the leading edge, as SwiftUI's does.
+          s.display = "flex";
+          s.flexDirection = "row";
+          s.justifyContent = "flex-start";
+          s.alignItems = "flex-start";
+        } else {
+          s.flex = "1 1 0";
+          s.alignSelf = "stretch";
+          s.minHeight = 0;
+          s.minWidth = 0;
+          s.overflowY = "auto";
+        }
+        // The screen's edge scroll on a document-scrolled page: its content
+        // runs on past it into the page, and the page scrolls.
+        const documentScrolled = edgeScrolls.has(n) && docScroll();
+        if (documentScrolled) {
+          // As tall as its content: the page scrolls it.
+          s.overflowY = "visible";
+          s.flex = "1 0 auto";
+          props["data-document-scroll"] = "1";
+        }
         s.overscrollBehavior = "contain";
         props["data-uui-scroll"] = "1";
         if (edgeScrolls.has(n)) {
@@ -2271,6 +2558,8 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
           // and end here (nested scrolls are not under the chrome).
           const pad = n.padding || [0, 0, 0, 0];
           s.paddingTop = `calc(${Number(pad[0]) || 0}px + ${INSET_TOP})`;
+          // (Document-scrolled, it also clears the keyboard, which covers
+          // the page's end: the last row can come up above the composer.)
           s.paddingBottom = `calc(${Number(pad[2]) || 0}px + ${INSET_BOTTOM})`;
           s.scrollPaddingTop = INSET_TOP;
           s.scrollPaddingBottom = INSET_BOTTOM;
@@ -2280,29 +2569,37 @@ export function createReactTreeRenderer({ container, sendEvent, assetBase = "ass
         }
         if (insetGrouped) {
           const dark = pageDark();
-          s.background = GROUPED_BACKGROUND(dark);
-          s["--uui-cell-bg"] = CELL_BACKGROUND(dark);
+          // In a sheet the grouped ground and cells take the sheet's own
+          // (elevated) colours, as iOS raises a sheet's grouped list.
+          s.background = `var(--uui-sheet-grouped-bg, ${GROUPED_BACKGROUND(dark)})`;
+          s["--uui-cell-bg"] = `var(--uui-sheet-cell-bg, ${CELL_BACKGROUND(dark)})`;
           s["--uui-separator"] = SEPARATOR(dark);
           kids = h("div", { key: "grouped", className: "uui-ig" }, kids);
         }
         // `.scrollDismissesKeyboard(.immediately / .interactively)`: a scroll
         // (or a touch drag) blurs the focused field, closing the soft keyboard.
         if ((n.params || {}).dismissKeyboard && (n.params || {}).dismissKeyboard !== "never") {
+          // Only the reader's own drag: the scroll's programmatic moves (it
+          // follows the keyboard coming up, staying at its bottom) must not
+          // close the keyboard they are making room for.
           const dismiss = () => {
             const active = document.activeElement;
             if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) active.blur();
           };
-          props.onScroll = dismiss;
-          props.onTouchMove = dismiss;
+          props.onTouchStart = (e) => { e.currentTarget.__uuiTouchY = e.touches[0] ? e.touches[0].clientY : null; };
+          props.onTouchMove = (e) => {
+            const start = e.currentTarget.__uuiTouchY;
+            if (start != null && e.touches[0] && Math.abs(e.touches[0].clientY - start) > 12) dismiss();
+          };
         }
         // `.defaultScrollAnchor(.bottom)` (a chat log): start at the bottom
         // and stay pinned there as content grows, until the user scrolls up.
         const request = (n.params || {}).scrollTo;
         const windowId = (n.params || {}).window;
         if ((n.params || {}).anchor === "bottom") {
-          return h(BottomAnchoredScroll, { key, divProps: props, request, windowId }, kids);
+          return h(BottomAnchoredScroll, { key, divProps: props, request, windowId, doc: documentScrolled }, kids);
         }
-        if (request || windowId) return h(RequestedScroll, { key, divProps: props, request, windowId }, kids);
+        if (request || windowId || documentScrolled) return h(RequestedScroll, { key, divProps: props, request, windowId, doc: documentScrolled, id: n.key || key }, kids);
         return h("div", props, kids);
       case "image": {
         const src = /^(https?:|data:|blob:)/.test(n.src) ? n.src : assetBase + n.src + (n.src.includes(".") ? "" : ".png");

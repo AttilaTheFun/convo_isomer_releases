@@ -1,4 +1,4 @@
-// Incremental adoption (Level 3) for React host apps: <UniversalUI /> drops
+// Incremental adoption (Level 3) for React host apps: <Isomer /> drops
 // a SwiftUI surface into an existing React tree — the React analogue of
 // `UIHostingController`, and the web peer of Apple's `WasmView`. The component
 // owns a container div; on mount it boots the wasm runtime into it under the
@@ -14,15 +14,15 @@
 // Uses the page's React (`window.React`, the same UMD global the tree renderer
 // uses), so the host app and the embedded surface share one React.
 //
-//   const { UniversalUI } = await import("./runtime/react_embed.js?v=691636620");
-//   <UniversalUI wasmURL="./app.wasm?v=691636620" renderer="react" style={{ height: 480 }} />
+//   const { Isomer } = await import("./runtime/react_embed.js?v=1339487809");
+//   <Isomer wasmURL="./app.wasm?v=1339487809" renderer="react" style={{ height: 480 }} />
 //   // or, with hot reload / dynamic delivery:
-//   <UniversalUI provider={appBundleProvider("./app.wasm?v=691636620", { hotReloadURL })} />
+//   <Isomer provider={appBundleProvider("./app.wasm?v=1339487809", { hotReloadURL })} />
 
-import { mountUniversalUI } from "./boot.js?v=08c34e2e";
-import { packagedBundleProvider } from "./bundle_provider.js?v=ca065710";
+import { mountIsomer } from "./boot.js?v=c3ec4acc";
+import { packagedBundleProvider } from "./bundle_provider.js?v=dee3d027";
 
-export function UniversalUI({ provider, wasmURL = "./app.wasm?v=691636620", renderer = "react", style }) {
+export function Isomer({ provider, wasmURL = "./app.wasm?v=1339487809", renderer = "react", style }) {
   const R = window.React;
   const ref = R.useRef(null);
   R.useEffect(() => {
@@ -34,7 +34,7 @@ export function UniversalUI({ provider, wasmURL = "./app.wasm?v=691636620", rend
       // The initial bundle renders first.
       const initial = await source.initialBundle();
       if (cancelled || !ref.current) return;
-      mounted = await mountUniversalUI(ref.current, { bundle: initial, renderer });
+      mounted = await mountIsomer(ref.current, { bundle: initial, renderer });
 
       // Newer bundles (hot-reload shadow, dynamic-delivery update) swap in by
       // tearing down and re-instantiating the surface — the web has no
@@ -43,7 +43,7 @@ export function UniversalUI({ provider, wasmURL = "./app.wasm?v=691636620", rend
       for await (const next of source.bundleUpdates()) {
         if (cancelled || !ref.current) break;
         if (mounted) mounted.unmount();
-        mounted = await mountUniversalUI(ref.current, { bundle: next, renderer });
+        mounted = await mountIsomer(ref.current, { bundle: next, renderer });
       }
     })();
 

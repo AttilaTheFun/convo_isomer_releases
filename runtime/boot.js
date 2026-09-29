@@ -1,4 +1,4 @@
-// Boots a Universal UI wasm application through the swift_ffi bindings:
+// Boots a Isomer wasm application through the swift_ffi bindings:
 // `load()` instantiates the reactor (WASI shim included), a plain object
 // implements the Swift `WebHost` protocol, and the exported functions drive
 // the runtime. Strings and structs copy at the boundary, so there is no
@@ -7,13 +7,29 @@
 import { importedFilesWasi } from "./imported_files.js?v=dae098c2";
 import { load } from "../app_bridge.js?v=ca18a899";
 import { createRasterHost } from "./raster.js?v=b562f9c2";
-import { createReactTreeRenderer } from "./react_renderer.js?v=8a7f4717";
+import { createReactTreeRenderer } from "./react_renderer.js?v=588245dd";
 import { applyPatch } from "./flat_tree.js?v=80dc009c";
 
 // `rendererName` picks the renderer (docs/renderer_layers.md): "webGPU"
 // (default) binds the self-drawing SwiftGPURenderer; "react" binds the
 // ReactRenderer, which mounts the serialized view tree as React components
 // and owns layout itself.
+// The page's clipboard, written during the tap that asked for it.
+function copyText(text) {
+  const fallback = () => {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none;font-size:16px";
+    document.body.appendChild(area);
+    area.select();
+    try { document.execCommand("copy"); } catch (err) { console.warn("[clipboard] copy failed", err); }
+    area.remove();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(fallback);
+  else fallback();
+}
+
 export async function boot({
   canvas, wasmURL, bundle, rendererName = "webGPU", embedded = false,
   // Host-side swift_ffi dependency injection (docs/wasm_di.md): entries built
@@ -65,25 +81,7 @@ export async function boot({
     // scrolls the page to show the focused field, carrying the pinned bars
     // off the top. Size the surface to the visual viewport instead, so the
     // bars stay and only the content between them shrinks (the iOS shape).
-    if (window.visualViewport && canvas.parentElement === document.body && documentScroll) {
-      // A document-scrolled page: the surface runs on as tall as its
-      // content (the page scrolls, not the surface). Its chrome is fixed or
-      // sticky, so the browser itself keeps a focused field above the
-      // keyboard; while one is focused the home indicator's inset is dropped.
-      treeContainer.style.overflow = "visible";
-      treeContainer.style.bottom = "auto";
-      treeContainer.style.height = "auto";
-      treeContainer.style.minHeight = "100%";
-      treeContainer.dataset.uuiDocument = "1";
-      const editing = () => {
-        const active = document.activeElement;
-        return !!active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable);
-      };
-      const inset = () => treeContainer.style.setProperty("--uui-safe-bottom", editing() ? "0px" : "env(safe-area-inset-bottom, 0px)");
-      document.addEventListener("focusin", inset);
-      document.addEventListener("focusout", () => setTimeout(inset, 0));
-      inset();
-    } else if (window.visualViewport && canvas.parentElement === document.body) {
+    if (window.visualViewport && canvas.parentElement === document.body) {
       const viewport = window.visualViewport;
       // The surface follows the keyboard both ways with the same easing
       // (Safari animates the viewport in, not out), and the home-indicator
@@ -116,7 +114,37 @@ export async function boot({
         return !!active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable);
       };
       let restHeight = pageHeight();
+      // Document scrolling (documentScroll) holds only while the page is
+      // phone-width, as the renderer's own test (isDesktop) has it: a wide
+      // page keeps the fixed, clipped surface its desktop layout needs.
+      // The mode follows the window across that line.
+      let inDocument = null;
+      const surface = treeContainer.style.cssText;
+      const applyMode = () => {
+        const next = documentScroll && window.innerWidth < 700;
+        if (next === inDocument) return;
+        inDocument = next;
+        document.documentElement.classList.toggle("uui-document", next);
+        if (next) {
+          // The surface runs on as tall as its content (the page scrolls,
+          // not the surface); its chrome is fixed or sticky, so the browser
+          // itself keeps a focused field above the keyboard.
+          treeContainer.style.cssText = "position:absolute;left:0;right:0;top:0;overflow:visible;display:flex;flex-direction:column;min-height:100%";
+          treeContainer.dataset.uuiDocument = "1";
+        } else {
+          treeContainer.style.cssText = surface;
+          treeContainer.style.transition = "height 0.25s ease-out, top 0.25s ease-out";
+          treeContainer.style.boxSizing = "border-box";
+          delete treeContainer.dataset.uuiDocument;
+        }
+        fit();
+      };
       const fit = () => {
+        if (inDocument) {
+          // Only the home indicator's inset, dropped while a field is focused.
+          treeContainer.style.setProperty("--uui-safe-bottom", editing() ? "0px" : "env(safe-area-inset-bottom, 0px)");
+          return;
+        }
         if (!editing()) restHeight = pageHeight();
         const keyboard = Math.max(0, Math.round(restHeight - viewport.height - viewport.offsetTop));
         const keyboardUp = editing() && keyboard > 120;
@@ -135,6 +163,8 @@ export async function boot({
       // A field gaining or losing focus changes what the viewport means.
       document.addEventListener("focusin", () => setTimeout(fit, 0));
       document.addEventListener("focusout", () => setTimeout(fit, 0));
+      window.addEventListener("resize", applyMode);
+      applyMode();
       // The page runs the whole screen too, so nothing clips the surface
       // at the short viewport's edge.
       if (navigator.standalone === true) {
@@ -413,6 +443,11 @@ export async function boot({
     // Generic platform-configuration channel (window title, platform
     // modifiers). Unknown keys are ignored by design.
     platformCommand(key, value) {
+      // `UIPasteboard.general.string = …`: the page's clipboard. Called from
+      // the tap's own event dispatch, so the browser counts it as the
+      // reader's gesture; the textarea route is for browsers without the
+      // async API (or refusing it outside a secure context).
+      if (key === "copy") { copyText(value); return; }
       // An embedded surface must not reconfigure the host page.
       if (embedded) return;
       if (key === "windowTitle") document.title = value;
@@ -520,15 +555,15 @@ export async function boot({
   return { bridge };
 }
 
-// Incremental adoption (Level 3): mount a Universal UI surface inside an
+// Incremental adoption (Level 3): mount a Isomer surface inside an
 // existing web page — the web analogue of dropping a `UIHostingController`'s
 // view into a UIKit hierarchy. Boots the runtime into the host-provided
 // `container` (the Swift side decides the root via its `@main` App or a
-// `UniversalUIHostingController`) under the chosen renderer: "react" builds
+// `IsomerHostingController`) under the chosen renderer: "react" builds
 // real DOM/React components inside the container; "webGPU" draws into a
 // canvas that fills it. Container resizes re-lay-out the embedded view
 // independently of the window. Returns { bridge, unmount }.
-export async function mountUniversalUI(container, { wasmURL, bundle, renderer = "webGPU", dependencies = {}, wasi = undefined } = {}) {
+export async function mountIsomer(container, { wasmURL, bundle, renderer = "webGPU", dependencies = {}, wasi = undefined } = {}) {
   // The react tree / host-view overlays anchor to the container.
   if (getComputedStyle(container).position === "static") {
     container.style.position = "relative";
@@ -538,7 +573,7 @@ export async function mountUniversalUI(container, { wasmURL, bundle, renderer = 
   container.appendChild(canvas);
 
   const result = await boot({
-    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=691636620"),
+    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=1339487809"),
     bundle, rendererName: renderer, embedded: true, dependencies, wasi,
   });
 

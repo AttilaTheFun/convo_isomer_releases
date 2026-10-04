@@ -5,9 +5,9 @@
 // pointer/length or staging-buffer plumbing here.
 
 import { importedFilesWasi } from "./imported_files.js?v=dae098c2";
-import { load } from "../app_bridge.js?v=ca18a899";
-import { createRasterHost } from "./raster.js?v=b562f9c2";
-import { createReactTreeRenderer } from "./react_renderer.js?v=fc572f44";
+import { load } from "../app_bridge.js?v=890e6a75";
+import { createRasterHost, registerImageBytes } from "./raster.js?v=0c2ee7c7";
+import { createReactTreeRenderer } from "./react_renderer.js?v=65b1824c";
 import { applyPatch } from "./flat_tree.js?v=80dc009c";
 
 // `rendererName` picks the renderer (docs/renderer_layers.md): "webGPU"
@@ -259,7 +259,8 @@ export async function boot({
     };
     reactTree = createReactTreeRenderer({
       container: treeContainer,
-      sendEvent: (id, value) => bridge.uuiHostEvent(id, value),
+      sendEvent: hostEvent,
+      sendKey: (id, value) => bridge.uuiKeyEvent(id, value),
       mapSurface,
       documentScroll,
     });
@@ -267,14 +268,29 @@ export async function boot({
     window.__uuiSendEvent = (id, value) => bridge.uuiHostEvent(id, value);
   }
 
-  let renderQueued = false;
+  let renderFrame = 0;
   function scheduleRender() {
-    if (renderQueued) return;
-    renderQueued = true;
-    requestAnimationFrame(() => {
-      renderQueued = false;
+    if (renderFrame) return;
+    renderFrame = requestAnimationFrame(() => {
+      renderFrame = 0;
       bridge.uuiRender();
     });
+  }
+
+  // A reader's tap renders what it changed before its event returns, not a
+  // frame later: what that frame presents may be something only the
+  // reader's gesture can open (a file picker: Safari opens one from
+  // `input.click()` only while the click is being dispatched).
+  let renderingInGesture = false;
+  const GESTURES = new Set(["click", "pointerup", "touchend", "keydown", "keyup"]);
+  function hostEvent(id, value) {
+    bridge.uuiHostEvent(id, value);
+    const event = window.event;
+    if (!renderFrame || !event || !event.isTrusted || !GESTURES.has(event.type)) return;
+    cancelAnimationFrame(renderFrame);
+    renderFrame = 0;
+    renderingInGesture = true;
+    try { bridge.uuiRender(); } finally { renderingInGesture = false; }
   }
 
 
@@ -456,13 +472,14 @@ export async function boot({
       if (typeof window.uuiPlatformCommand === "function") window.uuiPlatformCommand(key, value);
     },
     epochMillis() { return Date.now(); },
+    registerImage(source, bytes) { registerImageBytes(source, bytes); },
     renderTree(tree) {
       // Each buffer is a tree.fbs `Patch` — the only wire format — applied in
       // arrival order to the retained plain-object tree the React interpreter
       // walks (the first patch after start is a full-tree op at "n").
       retainedTree = applyPatch(retainedTree, tree);
       window.__uuiLastTree = JSON.stringify(retainedTree); // for headless smoke tests
-      reactTree.render(retainedTree);
+      reactTree.render(retainedTree, renderingInGesture);
       // A mounted map redraws with every tree frame (camera moves arrive as
       // new frames; tile completions schedule one through the image drain).
       if (mapSurface && mapSurface.el) mapSurface.draw();
@@ -483,8 +500,9 @@ export async function boot({
   bridge = await load(module, { dependencies, wasi: wasiWithFiles });
   if (gpuHost) {
     bridge.gpuConnect(gpuHost); // swift_gpu's WebGPU executor
-    bridge.uuiSetDisplayScale(window.devicePixelRatio || 1);
   }
+  // Device pixels per point: the GPU renderer's clips, and `\.displayScale`.
+  bridge.uuiSetDisplayScale(window.devicePixelRatio || 1);
 
   const scale = window.devicePixelRatio || 1;
   function resizeBacking() {
@@ -573,7 +591,7 @@ export async function mountIsomer(container, { wasmURL, bundle, renderer = "webG
   container.appendChild(canvas);
 
   const result = await boot({
-    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=3295097176"),
+    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=2494001968"),
     bundle, rendererName: renderer, embedded: true, dependencies, wasi,
   });
 

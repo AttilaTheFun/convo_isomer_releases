@@ -7,7 +7,7 @@
 import { importedFilesWasi } from "./imported_files.js?v=dae098c2";
 import { load } from "../app_bridge.js?v=890e6a75";
 import { createRasterHost, registerImageBytes } from "./raster.js?v=0c2ee7c7";
-import { createReactTreeRenderer } from "./react_renderer.js?v=65b1824c";
+import { createReactTreeRenderer } from "./react_renderer.js?v=9ebfd116";
 import { applyPatch } from "./flat_tree.js?v=80dc009c";
 
 // `rendererName` picks the renderer (docs/renderer_layers.md): "webGPU"
@@ -464,6 +464,13 @@ export async function boot({
       // reader's gesture; the textarea route is for browsers without the
       // async API (or refusing it outside a secure context).
       if (key === "copy") { copyText(value); return; }
+      // `ShareLink`: the system's share sheet where the browser has one
+      // (a phone's), else the text to the clipboard.
+      if (key === "share") {
+        if (navigator.share) navigator.share({ text: value }).catch(() => {});
+        else copyText(value);
+        return;
+      }
       // An embedded surface must not reconfigure the host page.
       if (embedded) return;
       if (key === "windowTitle") document.title = value;
@@ -591,7 +598,7 @@ export async function mountIsomer(container, { wasmURL, bundle, renderer = "webG
   container.appendChild(canvas);
 
   const result = await boot({
-    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=2494001968"),
+    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=740060285"),
     bundle, rendererName: renderer, embedded: true, dependencies, wasi,
   });
 

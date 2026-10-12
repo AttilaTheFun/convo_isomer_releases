@@ -7,7 +7,7 @@
 import { importedFilesWasi } from "./imported_files.js?v=dae098c2";
 import { load } from "../app_bridge.js?v=890e6a75";
 import { createRasterHost, registerImageBytes } from "./raster.js?v=0c2ee7c7";
-import { createReactTreeRenderer } from "./react_renderer.js?v=9ebfd116";
+import { createReactTreeRenderer } from "./react_renderer.js?v=bf575ccd";
 import { applyPatch } from "./flat_tree.js?v=80dc009c";
 
 // `rendererName` picks the renderer (docs/renderer_layers.md): "webGPU"
@@ -598,7 +598,7 @@ export async function mountIsomer(container, { wasmURL, bundle, renderer = "webG
   container.appendChild(canvas);
 
   const result = await boot({
-    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=740060285"),
+    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=1467138457"),
     bundle, rendererName: renderer, embedded: true, dependencies, wasi,
   });
 

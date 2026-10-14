@@ -673,7 +673,7 @@ export async function mountIsomer(container, { wasmURL, bundle, renderer = "webG
   container.appendChild(canvas);
 
   const result = await boot({
-    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=1333546243"),
+    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=758086383"),
     bundle, rendererName: renderer, embedded: true, dependencies, wasi, bundleIdentifier, fetch, WebSocket,
   });
 

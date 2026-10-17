@@ -4,11 +4,11 @@
 // the runtime. Strings and structs copy at the boundary, so there is no
 // pointer/length or staging-buffer plumbing here.
 
-import { appFilesKey, openAppFiles } from "./file_system.js?v=ecc387ae";
+import { appFilesKey, openAppFiles } from "./file_system.js?v=9df30af9";
 import { Dependencies, load } from "../app_bridge.js?v=cbb074d2";
 import { browserNetworkHosts } from "./network.js?v=59131a81";
 import { createRasterHost, registerImageBytes } from "./raster.js?v=0c2ee7c7";
-import { createReactTreeRenderer } from "./react_renderer.js?v=1511fe6c";
+import { createReactTreeRenderer } from "./react_renderer.js?v=d933af3f";
 import { applyPatch } from "./flat_tree.js?v=80dc009c";
 
 // `rendererName` picks the renderer (docs/renderer_layers.md): "webGPU"
@@ -673,7 +673,7 @@ export async function mountIsomer(container, { wasmURL, bundle, renderer = "webG
   container.appendChild(canvas);
 
   const result = await boot({
-    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=758086383"),
+    canvas, wasmURL: bundle ? undefined : (wasmURL || "./app.wasm?v=2772762076"),
     bundle, rendererName: renderer, embedded: true, dependencies, wasi, bundleIdentifier, fetch, WebSocket,
   });
 
